@@ -101,7 +101,7 @@ func someUsefulThings() {
 // (e.g. like the Username attribute) and methods (e.g. like the StoreFile method below).
 type User struct {
 	Username string
-
+	Password string
 	// You can add other attributes here if you want! But note that in order for attributes to
 	// be included when this struct is serialized to/from JSON, they must be capitalized.
 	// On the flipside, if you have an attribute that you want to be able to access from
@@ -115,11 +115,36 @@ type User struct {
 func InitUser(username string, password string) (userdataptr *User, err error) {
 	var userdata User
 	userdata.Username = username
+	userdata.Password = password
+	storageKey, err := uuid.FromBytes(userlib.Hash([]byte(username))[:16])
+	if err != nil {
+		return nil, err
+	}
+	userdataBytes, err := json.Marshal(userdata)
+	if err != nil {
+		return nil, err
+	}
+	userlib.DatastoreSet(storageKey, userdataBytes)
 	return &userdata, nil
 }
 
 func GetUser(username string, password string) (userdataptr *User, err error) {
+	storageKey, err := uuid.FromBytes(userlib.Hash([]byte(username))[:16])
+	if err != nil {
+		return nil, err
+	}
+	userdataBytes, ok := userlib.DatastoreGet(storageKey)
+	if !ok {
+		return nil, errors.New("user not found")
+	}
 	var userdata User
+	err = json.Unmarshal(userdataBytes, &userdata)
+	if err != nil {
+		return nil, err
+	}
+	if userdata.Password != password {
+		return nil, errors.New("incorrect password")
+	}
 	userdataptr = &userdata
 	return userdataptr, nil
 }
@@ -138,6 +163,24 @@ func (userdata *User) StoreFile(filename string, content []byte) (err error) {
 }
 
 func (userdata *User) AppendToFile(filename string, content []byte) error {
+	storageKey, err := uuid.FromBytes(userlib.Hash([]byte(filename + userdata.Username))[:16])
+	if err != nil {
+		return err
+	}
+	// get old Content
+	oldContentBytes, ok := userlib.DatastoreGet(storageKey)
+	if !ok {
+		return errors.New(strings.ToTitle("file not found"))
+	}
+	var oldContent []byte
+	json.Unmarshal(oldContentBytes, &oldContent)
+	// append
+	newContent := append(oldContent, content...)
+	newContentBytes, err := json.Marshal(newContent)
+	if err != nil {
+		return err
+	}
+	userlib.DatastoreSet(storageKey, newContentBytes)
 	return nil
 }
 
